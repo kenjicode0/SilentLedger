@@ -6,16 +6,61 @@ import "@typechain/hardhat";
 import "hardhat-deploy";
 import "hardhat-gas-reporter";
 import type { HardhatUserConfig } from "hardhat/config";
-import { vars } from "hardhat/config";
 import "solidity-coverage";
 
+import * as dotenv from "dotenv";
+import fs from "node:fs";
+import path from "node:path";
+
 import "./tasks/accounts";
-import "./tasks/FHECounter";
+import "./tasks/SilentLedger";
+import "./tasks/syncFrontend";
 
-// Run 'npx hardhat vars setup' to see the list of variables that need to be set
+dotenv.config();
 
-const MNEMONIC: string = vars.get("MNEMONIC", "test test test test test test test test test test test junk");
-const INFURA_API_KEY: string = vars.get("INFURA_API_KEY", "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz");
+function readDotEnvFallback(key: string): string | undefined {
+  try {
+    const envPath = path.resolve(process.cwd(), ".env");
+    const content = fs.readFileSync(envPath, "utf8");
+    const lines = content.split(/\r?\n/);
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trim();
+      if (!line || line.startsWith("#")) continue;
+
+      const match = line.match(/^([A-Z0-9_]+)=(.*)$/);
+      if (!match) continue;
+      if (match[1] !== key) continue;
+
+      const value = match[2].trim();
+      if (value) return value;
+
+      for (let j = i + 1; j < lines.length; j++) {
+        const next = lines[j].trim();
+        if (!next || next.startsWith("#")) continue;
+        if (next.includes("=")) break;
+        return next;
+      }
+    }
+  } catch {
+    // ignored
+  }
+
+  return undefined;
+}
+
+function getOptionalEnv(name: string): string | undefined {
+  const direct = process.env[name]?.trim();
+  if (direct) return direct;
+  const fallback = readDotEnvFallback(name)?.trim();
+  if (fallback) return fallback;
+  return undefined;
+}
+
+const INFURA_API_KEY = getOptionalEnv("INFURA_API_KEY");
+const PRIVATE_KEY_RAW = getOptionalEnv("PRIVATE_KEY");
+const PRIVATE_KEY = PRIVATE_KEY_RAW ? (PRIVATE_KEY_RAW.startsWith("0x") ? PRIVATE_KEY_RAW : `0x${PRIVATE_KEY_RAW}`) : undefined;
+const SEPOLIA_RPC_URL = INFURA_API_KEY ? `https://sepolia.infura.io/v3/${INFURA_API_KEY}` : "https://ethereum-sepolia.publicnode.com";
 
 const config: HardhatUserConfig = {
   defaultNetwork: "hardhat",
@@ -24,7 +69,7 @@ const config: HardhatUserConfig = {
   },
   etherscan: {
     apiKey: {
-      sepolia: vars.get("ETHERSCAN_API_KEY", ""),
+      sepolia: process.env.ETHERSCAN_API_KEY || "",
     },
   },
   gasReporter: {
@@ -34,28 +79,16 @@ const config: HardhatUserConfig = {
   },
   networks: {
     hardhat: {
-      accounts: {
-        mnemonic: MNEMONIC,
-      },
       chainId: 31337,
     },
-    anvil: {
-      accounts: {
-        mnemonic: MNEMONIC,
-        path: "m/44'/60'/0'/0/",
-        count: 10,
-      },
+    localhost: {
+      url: "http://127.0.0.1:8545",
       chainId: 31337,
-      url: "http://localhost:8545",
     },
     sepolia: {
-      accounts: {
-        mnemonic: MNEMONIC,
-        path: "m/44'/60'/0'/0/",
-        count: 10,
-      },
+      accounts: PRIVATE_KEY ? [PRIVATE_KEY] : [],
       chainId: 11155111,
-      url: `https://sepolia.infura.io/v3/${INFURA_API_KEY}`,
+      url: SEPOLIA_RPC_URL,
     },
   },
   paths: {
